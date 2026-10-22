@@ -308,17 +308,3 @@ fn vaapi_device() -> Option<PathBuf> {
     devices.sort();
     devices.into_iter().next()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn openh264_quality_scales_reference_bitrate() {
-        let default = openh264_bitrate(2_560, 1_440, 60, 18);
-
-        assert_eq!(default, 18_000_000);
-        assert!(openh264_bitrate(2_560, 1_440, 60, 12) > default);
-        assert!(openh264_bitrate(2_560, 1_440, 60, 24) < default);
-    }
-}

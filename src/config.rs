@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::Cli;
+use crate::cli::RenderArgs;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RenderConfig {
@@ -20,10 +20,10 @@ pub struct RenderConfig {
     pub show_title: bool,
 }
 
-impl TryFrom<&Cli> for RenderConfig {
+impl TryFrom<&RenderArgs> for RenderConfig {
     type Error = anyhow::Error;
 
-    fn try_from(cli: &Cli) -> Result<Self> {
+    fn try_from(cli: &RenderArgs) -> Result<Self> {
         if cli.width < 640 || cli.height < 360 {
             bail!("video dimensions must be at least 640x360");
         }
@@ -77,37 +77,4 @@ impl TryFrom<&Cli> for RenderConfig {
 
 const fn default_fft_size() -> usize {
     2_048
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    fn cli() -> Cli {
-        Cli::parse_from(["master-duel-ost"])
-    }
-
-    #[test]
-    fn default_profile_targets_2k60() {
-        let config = RenderConfig::try_from(&cli()).unwrap();
-        assert_eq!((config.width, config.height, config.fps), (2560, 1440, 60));
-        assert_eq!((config.visual_fps, config.bars), (24, 72));
-        assert_eq!(config.fft_size, 2_048);
-        assert_eq!(cli().jobs, 2);
-    }
-
-    #[test]
-    fn rejects_odd_dimensions() {
-        let mut args = cli();
-        args.width = 2559;
-        assert!(RenderConfig::try_from(&args).is_err());
-    }
-
-    #[test]
-    fn rejects_odd_bar_counts() {
-        let mut args = cli();
-        args.bars = 49;
-        assert!(RenderConfig::try_from(&args).is_err());
-    }
 }

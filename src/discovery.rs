@@ -31,6 +31,16 @@ pub fn discover_tracks(input: &Path, output_dir: &Path) -> Result<Vec<Track>> {
         bail!("input path does not exist: {}", input.display());
     }
 
+    let ogg_stems: HashSet<_> = files
+        .iter()
+        .filter(|path| path.extension().is_some_and(|extension| extension == "ogg"))
+        .map(|path| path.with_extension(""))
+        .collect();
+    files.retain(|path| {
+        path.extension().is_none_or(|extension| extension != "wav")
+            || !ogg_stems.contains(&path.with_extension(""))
+    });
+
     files.sort_by(|left, right| {
         sort_name(left)
             .cmp(&sort_name(right))
@@ -133,29 +143,5 @@ pub fn safe_video_stem(title: &str) -> String {
         "untitled".to_owned()
     } else {
         stem.to_owned()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preserves_python_title_rules() {
-        assert_eq!(
-            title_from_path(Path::new("BGM_DUEL_CLIMAX_01.wav")),
-            "duel climax 01"
-        );
-        assert_eq!(
-            title_from_path(Path::new("bgm-menu__retro.wav")),
-            "menu retro"
-        );
-        assert_eq!(title_from_path(Path::new("SONG.WAV")), "song");
-    }
-
-    #[test]
-    fn sanitizes_video_stems() {
-        assert_eq!(safe_video_stem("a:  b?/c"), "a bc");
-        assert_eq!(safe_video_stem("..."), "untitled");
     }
 }

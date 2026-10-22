@@ -4,17 +4,20 @@ mod cli;
 mod config;
 mod discovery;
 mod encoder;
+mod extract;
+mod fsb;
 mod manifest;
 mod renderer;
+mod unity;
 
-use std::path::PathBuf;
+use std::path::absolute;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 use crate::{
     batch::render_batch,
-    cli::Cli,
+    cli::{Cli, RenderArgs, Task},
     config::RenderConfig,
     discovery::discover_tracks,
     encoder::resolve_encoder,
@@ -29,26 +32,31 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    match Cli::parse().command {
+        Task::Extract(args) => extract::run(&args),
+        Task::Render(args) => render(args),
+    }
+}
+
+fn render(cli: RenderArgs) -> Result<()> {
     let mut config = RenderConfig::try_from(&cli)?;
     let input = absolute(&cli.input)?;
     let output_dir = absolute(&cli.output_dir)?;
-    let tracks = discover_tracks(&input, &output_dir)?;
+    let mut tracks = discover_tracks(&input, &output_dir)?;
 
     if tracks.is_empty() {
         bail!("no supported audio files found in {}", input.display());
     }
-    let mut selected_tracks = tracks;
     if let Some(limit) = cli.limit {
-        selected_tracks.truncate(limit);
+        tracks.truncate(limit);
     }
 
     if cli.dry_run {
-        for (index, track) in selected_tracks.iter().enumerate() {
+        for (index, track) in tracks.iter().enumerate() {
             println!(
                 "[{}/{}] {} -> {} ({})",
                 index + 1,
-                selected_tracks.len(),
+                tracks.len(),
                 track.source.display(),
                 track.output.display(),
                 track.title
@@ -57,7 +65,6 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    config.encoder = resolve_encoder(&config.encoder)?;
     std::fs::create_dir_all(&output_dir)
         .with_context(|| format!("failed to create {}", output_dir.display()))?;
     let project_root = std::env::current_dir().context("failed to resolve current directory")?;
@@ -65,29 +72,29 @@ fn run() -> Result<()> {
     let profile = RunProfile::new(config.clone(), cli.max_duration);
     let mut summary = Summary::load(&summary_path)?;
     let render_queue = summary.prepare(
-        &selected_tracks,
+        &tracks,
         &project_root,
         profile,
         cli.overwrite,
-        cli.limit.is_none(),
+        cli.limit.is_none() && input.is_dir(),
     )?;
     summary.save(&summary_path)?;
+
+    if !cli.quiet {
+        summary.changes.print();
+    }
 
     if cli.summary_only {
         if !cli.quiet {
             println!(
                 "indexed {} track(s) in {} without rendering",
-                selected_tracks.len(),
+                tracks.len(),
                 summary_path.display()
             );
         }
         return Ok(());
     }
 
-    let unchanged = selected_tracks.len() - render_queue.len();
-    if unchanged > 0 && !cli.quiet {
-        println!("unchanged: {unchanged}");
-    }
     if render_queue.is_empty() {
         if !cli.quiet {
             println!("all outputs are up to date");
@@ -95,7 +102,8 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let workers = cli.jobs.min(render_queue.len()).max(1);
+    config.encoder = resolve_encoder(&config.encoder)?;
+    let workers = cli.jobs.min(render_queue.len());
     let threads = encoder_threads(workers);
     let failures = render_batch(
         render_queue,
@@ -129,13 +137,4 @@ fn encoder_threads(jobs: usize) -> usize {
         .saturating_sub(jobs)
         .div_ceil(jobs)
         .max(1)
-}
-
-fn absolute(path: &std::path::Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        return Ok(path.to_path_buf());
-    }
-    Ok(std::env::current_dir()
-        .context("failed to resolve current directory")?
-        .join(path))
 }

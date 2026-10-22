@@ -1,6 +1,4 @@
 use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
     path::Path,
     process::{Command, Stdio},
 };
@@ -12,85 +10,6 @@ const MIN_FREQUENCY: f32 = 40.0;
 const PEAK_HISTOGRAM_BINS: usize = 8_192;
 const TEMPORAL_ATTACK: f32 = 0.58;
 const TEMPORAL_RELEASE: f32 = 0.55;
-
-pub fn estimate_duration(source: &Path) -> Option<f64> {
-    if source
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
-        && let Ok(mut file) = File::open(source)
-        && let Some(duration) = wav_duration(&mut file)
-    {
-        return Some(duration);
-    }
-
-    let output = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-        ])
-        .arg(source)
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<f64>()
-        .ok()
-        .filter(|duration| duration.is_finite() && *duration > 0.0)
-}
-
-fn wav_duration(reader: &mut (impl Read + Seek)) -> Option<f64> {
-    let mut header = [0_u8; 12];
-    reader.read_exact(&mut header).ok()?;
-    if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
-        return None;
-    }
-
-    let mut byte_rate = None;
-    let mut data_bytes = None;
-    loop {
-        let mut chunk_header = [0_u8; 8];
-        if reader.read_exact(&mut chunk_header).is_err() {
-            break;
-        }
-        let chunk_size = u32::from_le_bytes(chunk_header[4..].try_into().ok()?) as u64;
-        match &chunk_header[..4] {
-            b"fmt " if chunk_size >= 12 => {
-                let mut format = [0_u8; 12];
-                reader.read_exact(&mut format).ok()?;
-                byte_rate = Some(u32::from_le_bytes(format[8..12].try_into().ok()?));
-                reader
-                    .seek(SeekFrom::Current((chunk_size - 12 + chunk_size % 2) as i64))
-                    .ok()?;
-            }
-            b"data" => {
-                data_bytes = Some(chunk_size);
-                if byte_rate.is_some() {
-                    break;
-                }
-                reader
-                    .seek(SeekFrom::Current((chunk_size + chunk_size % 2) as i64))
-                    .ok()?;
-            }
-            _ => {
-                reader
-                    .seek(SeekFrom::Current((chunk_size + chunk_size % 2) as i64))
-                    .ok()?;
-            }
-        }
-    }
-    let byte_rate = f64::from(byte_rate?);
-    let duration = data_bytes? as f64 / byte_rate;
-    (byte_rate > 0.0 && duration.is_finite() && duration > 0.0).then_some(duration)
-}
 
 #[derive(Debug)]
 pub struct AudioAnalysis {
@@ -137,8 +56,8 @@ impl AudioAnalysis {
 
         let decoded = output.stdout;
         let mut samples = Vec::with_capacity(decoded.len() / 2);
-        for bytes in decoded.chunks_exact(2) {
-            let value = i16::from_le_bytes(bytes.try_into().expect("two-byte chunk"));
+        for bytes in decoded.as_chunks::<2>().0 {
+            let value = i16::from_le_bytes(*bytes);
             samples.push(f32::from(value) / 32_768.0);
         }
         drop(decoded);
@@ -395,7 +314,6 @@ fn sample_linear(values: &[f32], position: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
 
     use super::*;
 
@@ -495,25 +413,5 @@ mod tests {
     fn percentile_is_deterministic() {
         let mut values = vec![9.0, 1.0, 5.0, 3.0];
         assert_eq!(percentile(&mut values, 0.5), 5.0);
-    }
-
-    #[test]
-    fn reads_duration_from_pcm_wav_header() {
-        let mut wav = Vec::new();
-        wav.extend_from_slice(b"RIFF");
-        wav.extend_from_slice(&32_036_u32.to_le_bytes());
-        wav.extend_from_slice(b"WAVEfmt ");
-        wav.extend_from_slice(&16_u32.to_le_bytes());
-        wav.extend_from_slice(&1_u16.to_le_bytes());
-        wav.extend_from_slice(&2_u16.to_le_bytes());
-        wav.extend_from_slice(&8_000_u32.to_le_bytes());
-        wav.extend_from_slice(&32_000_u32.to_le_bytes());
-        wav.extend_from_slice(&4_u16.to_le_bytes());
-        wav.extend_from_slice(&16_u16.to_le_bytes());
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&32_000_u32.to_le_bytes());
-        wav.resize(32_044, 0);
-
-        assert_eq!(wav_duration(&mut Cursor::new(wav)), Some(1.0));
     }
 }

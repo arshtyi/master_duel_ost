@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum EncoderChoice {
@@ -28,10 +28,40 @@ impl EncoderChoice {
 }
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Batch-render circular OST visualizers")]
+#[command(version, about = "Extract Master Duel music and render OST videos")]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Task,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Task {
+    /// Analyze game bundles and export new or modified BGM tracks.
+    Extract(ExtractArgs),
+    /// Render videos for new or modified audio.
+    Render(RenderArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ExtractArgs {
+    /// Game installation, asset directory, or individual UnityFS bundle.
+    pub input: PathBuf,
+    #[arg(short, long, default_value = "inputs")]
+    pub output_dir: PathBuf,
+    /// Change summary and persistent bundle index.
+    #[arg(long, default_value = "summary/extract.json")]
+    pub summary: PathBuf,
+    /// Rescan bundle metadata even when size and modification time match.
+    #[arg(long)]
+    pub rescan: bool,
+    #[arg(short, long)]
+    pub quiet: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RenderArgs {
     /// Audio file or directory to scan recursively.
-    #[arg(default_value = "AudioClip")]
+    #[arg(default_value = "inputs")]
     pub input: PathBuf,
 
     /// Directory for generated MP4 files.
@@ -39,7 +69,7 @@ pub struct Cli {
     pub output_dir: PathBuf,
 
     /// Persistent incremental-render summary.
-    #[arg(long, default_value = "render-summary.json")]
+    #[arg(long, default_value = "summary/render.json")]
     pub summary: PathBuf,
 
     /// Output width in pixels.

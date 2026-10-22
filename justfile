@@ -1,14 +1,10 @@
-assetstudio := 'C:\Software\AssetStudio\AssetStudioModCLI.exe'
-game_dir := 'C:\Software\Steam\steamapps\common\Yu-Gi-Oh!  Master Duel'
-export_dir := 'Microsoft.PowerShell.Core\FileSystem::\\wsl.localhost\FedoraLinux-44\home\arshtyi\workspace\master_duel_ost'
+game_dir := '/mnt/c/Software/Steam/steamapps/common/Yu-Gi-Oh!  Master Duel'
 
-default: list
-
-list:
+default:
     @just --list
 
-export-ost:
-    powershell.exe -NoLogo -NoProfile -NonInteractive -Command '$ErrorActionPreference = "Stop"; $env:DOTNET_ROOT = "C:\Program Files\dotnet"; $output = Convert-Path -LiteralPath "{{ export_dir }}"; & "{{ assetstudio }}" "{{ game_dir }}" -m export -t audio -g type -f assetName -o $output -r --audio-format wav --filter-by-name "^BGM_" --filter-with-regex; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
+extract input=game_dir:
+    cargo run --release -- extract '{{ input }}'
 
-run:
-    cargo run --release
+render *args:
+    cargo run --release -- render {{ args }}
